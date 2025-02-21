@@ -6,18 +6,25 @@ import {
   Param,
   Patch,
   Delete,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
 import { InvoiceService } from './invoice.service';
 import { CreateInvoiceDto } from './dto/CreateInvoice.dto';
 import { UpdateInvoiceDto } from './dto/UpdateInvoice.dto';
+import { FilesInterceptor } from '@nestjs/platform-express';
 
 @Controller('invoice')
 export class InvoiceController {
   constructor(private invoiceService: InvoiceService) {}
 
   @Post('create')
-  create(@Body() data: CreateInvoiceDto) {
-    return this.invoiceService.create(data);
+  @UseInterceptors(FilesInterceptor('files'))
+  create(
+    @Body() data: CreateInvoiceDto,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    return this.invoiceService.create(data, files);
   }
 
   @Get()

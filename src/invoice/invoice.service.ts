@@ -8,38 +8,81 @@ import {
 import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateInvoiceDto } from './dto/CreateInvoice.dto';
 import { UpdateInvoiceDto } from './dto/UpdateInvoice.dto';
+import { FileUploadService } from 'src/file-upload/file-upload.service';
 
 @Injectable()
 export class InvoiceService {
   private readonly logger = new Logger(InvoiceService.name);
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private fileUploadService: FileUploadService,
+  ) {}
 
   //   logic to create invoice
-  async create(data: CreateInvoiceDto) {
+  async create(data: CreateInvoiceDto, files: Express.Multer.File[] = []) {
     try {
+      // Transform form-data fields
+      const formattedData = {
+        ...data,
+        date: new Date(data.date), // Ensure date is converted correctly
+        totalAmount: parseFloat(data.totalAmount as unknown as string), // Ensure totalAmount is a number
+      };
+
+      // Check for duplicate invoice number
       const existingInvoice = await this.prisma.invoice.findUnique({
-        where: { invoiceNumber: data.invoiceNumber },
+        where: { invoiceNumber: formattedData.invoiceNumber },
       });
 
       if (existingInvoice) {
         throw new BadRequestException('Invoice already exists');
       }
 
+      // Create the new invoice
       const newInvoice = await this.prisma.invoice.create({
-        data: {
-          ...data,
-          date: new Date(data.date),
-        },
+        data: formattedData,
       });
-      this.logger.log(` invoice ${data.invoiceNumber}, created!`);
 
-      return { message: 'invoice created successfully', data: newInvoice };
+      // Upload files and save metadata
+      const uploadedFiles: string[] = [];
+      for (const file of files) {
+        const fileMetadata = await this.fileUploadService.uploadFile(
+          file,
+          newInvoice.id,
+        );
+        uploadedFiles.push(fileMetadata.id);
+      }
+
+      // Update the invoice to connect the uploaded files
+      const updatedInvoice = await this.prisma.invoice.update({
+        where: { id: newInvoice.id },
+        data: {
+          files: {
+            connect: uploadedFiles.map((fileId) => ({ id: fileId })), // Connect file IDs to the invoice
+          },
+        },
+        include: { files: true }, // Include files in the response
+      });
+
+      // Log the successful creation
+      this.logger.log(`Invoice ${formattedData.invoiceNumber} created!`);
+
+      // Return the response with the updated invoice
+      return {
+        message: 'Invoice created successfully',
+        data: updatedInvoice, // Return the updated invoice with files
+      };
     } catch (error) {
-      throw new BadRequestException('Error creating invoice: ' + error);
+      // Log the error
+      this.logger.error(`Error creating invoice: ${error.message}`);
+
+      // Throw appropriate exception
+      if (error instanceof BadRequestException) {
+        throw error; // Re-throw known exceptions
+      }
+      throw new InternalServerErrorException('Failed to create invoice');
     }
   }
-
-  //   get all the invoice from db
+  //   get all the invoice from db--------------------------------------------------------------------
   async findAll() {
     try {
       const invoices = await this.prisma.invoice.findMany();

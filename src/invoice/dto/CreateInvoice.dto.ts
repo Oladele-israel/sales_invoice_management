@@ -7,6 +7,7 @@ import {
   Matches,
   Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 import { PaymentStatus } from '@prisma/client';
 
@@ -23,6 +24,7 @@ export class CreateInvoiceDto {
   date: Date;
 
   @IsNotEmpty()
+  @Transform(({ value }) => parseFloat(value))
   @IsNumber()
   @Min(0.01, { message: 'totalAmount must be a positive number' })
   totalAmount: number;
