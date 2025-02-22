@@ -1,11 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
-import { Readable } from 'stream';
+import { v2 as cloudinary } from 'cloudinary';
 import { ConfigService } from '@nestjs/config';
+import {
+  extractPublicId,
+  uploadToCloudinary,
+} from 'src/utils/cloudinary.utils';
 
 @Injectable()
 export class FileUploadService {
+  private readonly logger = new Logger(FileUploadService.name);
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
@@ -16,33 +20,10 @@ export class FileUploadService {
       api_secret: this.configService.get<string>('CLOUDINARY_API_SECRET'),
     });
   }
-
+  // uploading a file to cloud and saves metadata in db
   async uploadFile(file: Express.Multer.File, invoiceId: string) {
     try {
-      // Upload file to Cloudinary
-      const uploadResult = await new Promise<UploadApiResponse>(
-        (resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            { resource_type: 'auto', folder: 'invoice' },
-            (error, result) => {
-              if (error) {
-                reject(new Error(error.message || 'File upload failed')); // Wrap in Error
-                return;
-              } else resolve(result as UploadApiResponse);
-            },
-          );
-
-          // Convert buffer to stream
-          const readableStream = new Readable();
-          readableStream.push(file.buffer);
-          readableStream.push(null);
-          readableStream.pipe(uploadStream);
-        },
-      );
-
-      console.log('this is the result -->', uploadResult);
-
-      // Save file metadata to the database
+      const uploadResult = await uploadToCloudinary(file);
       const fileMetadata = await this.prisma.file.create({
         data: {
           filename: file.originalname,
@@ -58,29 +39,24 @@ export class FileUploadService {
     }
   }
 
+  // deletigna file
   async deleteFile(fileId: string) {
     try {
-      // Delete file from Cloudinary
       const file = await this.prisma.file.findUnique({ where: { id: fileId } });
-      if (file && file.url) {
-        const publicId = file.url.split('/').pop()?.split('.')[0]; // Use optional chaining
-        if (publicId) {
-          await cloudinary.uploader.destroy(publicId);
-        }
-
-        // Delete file metadata from the database
-        await this.prisma.file.delete({ where: { id: fileId } });
-        console.log(`File ${fileId} deleted successfully`);
-        return { message: 'File deleted successfully' };
-      } else {
+      if (!file || !file.url) {
         throw new Error('File not found');
       }
+
+      const publicId = extractPublicId(file.url);
+      if (publicId) {
+        await cloudinary.uploader.destroy(publicId);
+      }
+      await this.prisma.file.delete({ where: { id: fileId } });
+      this.logger.log(`File ${fileId} deleted successfully`);
+      return { message: 'File deleted successfully' };
     } catch (error) {
-      console.error('Error deleting file:', error); // Log the entire error object
-      throw new Error(
-        'Failed to delete file: ' +
-          (error instanceof Error ? error.message : 'Unknown error'),
-      );
+      this.logger.error(`Error deleting file: ${error.message}`);
+      throw new Error(`Failed to delete file: ${error.message}`);
     }
   }
 }

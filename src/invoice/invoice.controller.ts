@@ -8,6 +8,8 @@ import {
   Delete,
   UseInterceptors,
   UploadedFiles,
+  Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { InvoiceService } from './invoice.service';
 import { CreateInvoiceDto } from './dto/CreateInvoice.dto';
@@ -45,5 +47,24 @@ export class InvoiceController {
   @Delete(':id')
   deleteInvoice(@Param('id') id: string) {
     return this.invoiceService.delete(id);
+  }
+
+  @Get('filter/payment')
+  filterByPaymentStatus(@Query('paymentStatus') paymentStatus: string) {
+    if (!paymentStatus) {
+      throw new BadRequestException('Payment status is required');
+    }
+    return this.invoiceService.filterByPaymentStatus(paymentStatus);
+  }
+
+  @Get('filter/date')
+  filterByDateRange(
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    if (!startDate || !endDate) {
+      throw new BadRequestException('Start date and end date are required');
+    }
+    return this.invoiceService.filterByDateRange(startDate, endDate);
   }
 }

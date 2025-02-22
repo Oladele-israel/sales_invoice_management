@@ -21,14 +21,12 @@ export class InvoiceService {
   //   logic to create invoice
   async create(data: CreateInvoiceDto, files: Express.Multer.File[] = []) {
     try {
-      // Transform form-data fields
       const formattedData = {
         ...data,
         date: new Date(data.date), // Ensure date is converted correctly
         totalAmount: parseFloat(data.totalAmount as unknown as string), // Ensure totalAmount is a number
       };
 
-      // Check for duplicate invoice number
       const existingInvoice = await this.prisma.invoice.findUnique({
         where: { invoiceNumber: formattedData.invoiceNumber },
       });
@@ -37,12 +35,10 @@ export class InvoiceService {
         throw new BadRequestException('Invoice already exists');
       }
 
-      // Create the new invoice
       const newInvoice = await this.prisma.invoice.create({
         data: formattedData,
       });
 
-      // Upload files and save metadata
       const uploadedFiles: string[] = [];
       for (const file of files) {
         const fileMetadata = await this.fileUploadService.uploadFile(
@@ -57,35 +53,34 @@ export class InvoiceService {
         where: { id: newInvoice.id },
         data: {
           files: {
-            connect: uploadedFiles.map((fileId) => ({ id: fileId })), // Connect file IDs to the invoice
+            connect: uploadedFiles.map((fileId) => ({ id: fileId })),
           },
         },
-        include: { files: true }, // Include files in the response
+        include: { files: true },
       });
 
-      // Log the successful creation
       this.logger.log(`Invoice ${formattedData.invoiceNumber} created!`);
 
-      // Return the response with the updated invoice
       return {
         message: 'Invoice created successfully',
-        data: updatedInvoice, // Return the updated invoice with files
+        data: updatedInvoice,
       };
     } catch (error) {
-      // Log the error
       this.logger.error(`Error creating invoice: ${error.message}`);
-
-      // Throw appropriate exception
       if (error instanceof BadRequestException) {
-        throw error; // Re-throw known exceptions
+        throw error;
       }
       throw new InternalServerErrorException('Failed to create invoice');
     }
   }
+
   //   get all the invoice from db--------------------------------------------------------------------
   async findAll() {
     try {
       const invoices = await this.prisma.invoice.findMany();
+      if (invoices.length === 0) {
+        throw new NotFoundException('No invoices found');
+      }
       this.logger.log('Fetched all invoices');
       return { message: 'all invoice fetch successfully', data: invoices };
     } catch (error) {
@@ -116,7 +111,7 @@ export class InvoiceService {
     }
   }
 
-  //   update invoice by Id
+  //-------------------------------------------   update invoice by Id
   async update(id: string, data: UpdateInvoiceDto) {
     try {
       const existingInvoice = await this.prisma.invoice.findUnique({
@@ -127,7 +122,6 @@ export class InvoiceService {
         throw new NotFoundException('Invoice not found');
       }
 
-      // Check for duplicate invoice number (if invoiceNumber is being updated)
       if (
         data.invoiceNumber &&
         data.invoiceNumber !== existingInvoice.invoiceNumber
@@ -141,7 +135,6 @@ export class InvoiceService {
         }
       }
 
-      // Update the invoice
       const updatedInvoice = await this.prisma.invoice.update({
         where: { id },
         data: {
@@ -154,20 +147,16 @@ export class InvoiceService {
       return { message: 'updated successfully', Data: updatedInvoice };
     } catch (error) {
       this.logger.error(`Failed to update invoice: ${error}`);
-      if (
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error; // Re-throw known exceptions
+      if (error instanceof BadRequestException) {
+        throw error;
       }
       throw new InternalServerErrorException('Failed to update invoice');
     }
   }
 
-  //   delete by Id logic
+  //---------------------------------------------------------------------   delete by Id logic
   async delete(id: string) {
     try {
-      // Check if the invoice exists
       const existingInvoice = await this.prisma.invoice.findUnique({
         where: { id },
       });
@@ -175,8 +164,6 @@ export class InvoiceService {
       if (!existingInvoice) {
         throw new NotFoundException('Invoice not found');
       }
-
-      // Delete the invoice
       await this.prisma.invoice.delete({
         where: { id },
       });
@@ -189,6 +176,67 @@ export class InvoiceService {
         throw error;
       }
       throw new InternalServerErrorException('Failed to delete invoice');
+    }
+  }
+
+  // ---------------------------sorting and filtering-------
+  // filter by payment status
+  async filterByPaymentStatus(paymentStatus) {
+    try {
+      this.logger.log(`Filtering by payment status: ${paymentStatus}`);
+      const invoices = await this.prisma.invoice.findMany({
+        where: { paymentStatus },
+      });
+
+      this.logger.log(`Fetched invoices: ${JSON.stringify(invoices)}`);
+      return {
+        message: 'Invoices fetched successfully',
+        data: invoices,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch invoices by payment status: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException('Failed to fetch invoices');
+    }
+  }
+
+  // filterBy date range
+  async filterByDateRange(startDate: string, endDate: string) {
+    try {
+      if (new Date(startDate) > new Date(endDate)) {
+        throw new BadRequestException('Start date cannot be after end date');
+      }
+
+      this.logger.log(`Filtering by date range: ${startDate} to ${endDate}`);
+
+      const invoices = await this.prisma.invoice.findMany({
+        where: {
+          date: {
+            gte: new Date(startDate),
+            lte: new Date(endDate),
+          },
+        },
+      });
+
+      this.logger.log(`Fetched invoices: ${JSON.stringify(invoices)}`);
+
+      return {
+        message: 'Invoices fetched successfully',
+        data: invoices,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to fetch invoices by date range: ${error.message}`,
+        error.stack,
+      );
+
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException('Failed to fetch invoices');
     }
   }
 }
